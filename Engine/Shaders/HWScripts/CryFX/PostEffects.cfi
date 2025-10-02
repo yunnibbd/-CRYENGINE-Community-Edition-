@@ -1,0 +1,10 @@
+﻿// Minimal stub to satisfy custom fullscreen test shader.
+// Extend with real post‑effect uniforms as needed.
+
+#ifndef __POSTEFFECTS_MIN_STUB__
+#define __POSTEFFECTS_MIN_STUB__
+
+// Engine already defines PS_ScreenSize (float4: xy = size, zw = 1/size)
+#define ScreenSize PS_ScreenSize
+
+#endif

@@ -1,0 +1,319 @@
+
+Buffer<uint>        Fwd_TileLightMaskRayTracing : register(t17);
+
+float4 lightMaskBoxMin;
+float4 lightMaskBoxMax;
+float4 lightMaskBoxGridDims;
+
+uint GetLightMask_Raytracing(uint lightCount)
+{
+	return lightCount >= 32 ? 0xFFFFFFFF : (1 << min(lightCount, 31)) - 1;
+}
+
+//#define SKIP_LIGHT_MASK 1
+
+void TiledForwardShading_Raytracing(in ForwardShadingAttribs attribs, inout float3 diffuseAcc, inout float3 specularAcc, SamplerState ssTrilinearClamp, SamplerComparisonState ssComparison,
+                         const bool shadowHighQualityFiltering, const bool applyProbes, const bool applyNonProbes, const bool bSkipSpecularProbes = false, const bool bOpaque = false)
+{
+	uint2 numTiles = ceil( CV_ScreenSize.xy / float2(TILED_SHADING_TILE_SIZE_X, TILED_SHADING_TILE_SIZE_Y) );
+	
+	float2 tcProj    = attribs.screenUV;
+	uint2  tileIdx   = uint2( tcProj.x * numTiles.x, tcProj.y * numTiles.y );
+	float3 voxelDims = (lightMaskBoxMax.xyz - lightMaskBoxMin.xyz) / lightMaskBoxGridDims.xyz;
+	uint3  voxelIdx  = (attribs.worldPos + GetWorldViewPos() - lightMaskBoxMin) / voxelDims; 
+	uint   bufferIdx = 8 * (voxelIdx.z * lightMaskBoxGridDims.y * lightMaskBoxGridDims.x + voxelIdx.y * lightMaskBoxGridDims.x + voxelIdx.x);
+	
+	float probeWeightSum = 0;
+	float3 viewVec = normalize(-attribs.custom.RayDirection);
+	float specCubeLod = TILED_SHADING_SPECPROBE_MAXMIP - attribs.smoothness * TILED_SHADING_SPECPROBE_MAXMIP;
+	float NdotV = saturate(dot(viewVec, attribs.normalSpecProbe));
+	float3 envFresnel = GetEnvmapFresnel(attribs.reflectance, attribs.smoothness, NdotV);
+	float2 envBRDF = Fwd_EnvironmentBRDF.SampleLevel(ssTrilinearClamp, float2(NdotV, attribs.smoothness), 0).xy;
+	envFresnel = lerp(envBRDF.xxx, envBRDF.yyy, attribs.reflectance);
+
+	float2 occlusion = float2(1, 1);
+	if (bOpaque)
+	{
+		float aoAmount = Fwd_RandomRotations[attribs.screenUV * CV_ScreenSize.xy].w;
+		float occlDiff = saturate(1 - aoAmount * 1.0);
+		float occlSpec = saturate(1 - aoAmount * 1.5);
+		occlusion.x = occlDiff * occlDiff;
+		occlusion.y = DeriveSpecularOcclusion(NdotV, max(occlSpec * occlSpec, 0.3), attribs.smoothness);
+	}
+	
+	int lightIndex = -1;
+	uint maskIndex = 0;
+	uint lightCount = SVO_ShadeParams0.z;
+	
+#ifdef SKIP_LIGHT_MASK
+	uint curMask = GetLightMask_Raytracing(lightCount);
+#else
+	uint curMask = Fwd_TileLightMaskRayTracing[bufferIdx];
+#endif
+		
+	[loop]
+	for (;;)
+	{
+		while (maskIndex < 8)
+		{
+			lightIndex = GetNextTileLightIndex(curMask, lightIndex);
+			if (lightIndex >= 0) 
+				break;
+			else 
+			{
+#ifdef SKIP_LIGHT_MASK
+				++maskIndex;
+				lightCount -= 32;
+				curMask = GetLightMask_Raytracing(lightCount);
+#else
+				curMask = Fwd_TileLightMaskRayTracing[++maskIndex + bufferIdx];
+#endif
+			}
+		}
+	
+		uint lightShadeInfoIdx = lightIndex + maskIndex * 32;
+		int lightType = Fwd_TiledLightsShadeInfo[lightShadeInfoIdx].lightType;
+		
+		[branch]
+		if (lightIndex < 0 || lightType > LIGHT_TYPE_AMBIENT_AREA)
+			break;
+			
+		if (applyProbes)
+		{
+			const float clipVolumeWeight = 1;  // TODO
+			if (lightType == LIGHT_TYPE_PROBE && probeWeightSum < 1 && clipVolumeWeight > 0)
+			{
+				float3 lightVec = Fwd_TiledLightsShadeInfo[lightShadeInfoIdx].posRad.xyz - (attribs.worldPos + GetWorldViewPos());
+				
+				// Compute attenuation for box
+				float3 tmpLightVec;
+				tmpLightVec.x = dot( Fwd_TiledLightsShadeInfo[lightShadeInfoIdx].projectorMatrix[0].xyz, lightVec );
+				tmpLightVec.y = dot( Fwd_TiledLightsShadeInfo[lightShadeInfoIdx].projectorMatrix[1].xyz, lightVec );
+				tmpLightVec.z = dot( Fwd_TiledLightsShadeInfo[lightShadeInfoIdx].projectorMatrix[2].xyz, lightVec );
+				
+				[branch] if (abs(tmpLightVec.x) < 1 && abs(tmpLightVec.y) < 1 && abs(tmpLightVec.z) < 1)  // Required for correctness and performance
+				{
+					tmpLightVec = MapCubeToSphere( tmpLightVec );
+					float4 lightColor = Fwd_TiledLightsShadeInfo[lightShadeInfoIdx].color;
+
+					float attenuation = GetAttenuation( tmpLightVec, 1, true, Fwd_TiledLightsShadeInfo[lightShadeInfoIdx].attenuationParams.y ) * Fwd_TiledLightsShadeInfo[lightShadeInfoIdx].attenuationParams.x;
+					uint4 resIndexClamps = GetResourceIndexAndMipClamps(Fwd_TiledLightsShadeInfo[lightShadeInfoIdx].resIndex);
+				
+					// Diffuse
+					float4 diffuseProbe = Fwd_DiffuseCubeArray.SampleLevel( ssTrilinearClamp, float4( attribs.normal, resIndexClamps.x ), resIndexClamps.y );
+					diffuseProbe.rgb = DecodeHDRCubemap( diffuseProbe );
+					float probeWeight = (1 - probeWeightSum) * attenuation;
+					diffuseAcc += diffuseProbe.rgb * (lightColor.rgb * probeWeight) * occlusion.x;
+			
+					if (!bSkipSpecularProbes)
+					{
+						// Specular
+						float tmpGloss = 0;
+						float3 tmpReflVec = reflect(-viewVec, attribs.normalSpecProbe);
+						CubemapBoxParallaxCorrection( tmpReflVec, lightVec, Fwd_TiledLightsShadeInfo[lightShadeInfoIdx].shadowMatrix[0].xyz, Fwd_TiledLightsShadeInfo[lightShadeInfoIdx].shadowMatrix[1].xyz, tmpGloss );
+						float4 specularProbe = Fwd_SpecCubeArray.SampleLevel( ssTrilinearClamp, float4( tmpReflVec, resIndexClamps.x ), max(resIndexClamps.z, specCubeLod) );
+						specularProbe.rgb = DecodeHDRCubemap( specularProbe ) * envFresnel;
+						specularAcc += specularProbe.rgb * (lightColor.rgb * probeWeight) * occlusion.y * lightColor.a;
+					}	
+					
+					probeWeightSum += probeWeight;
+				}
+			}
+		}
+	}
+		
+#if FEATURE_SVO_GI
+	if (bOpaque)
+	{
+		ApplyGI(specularAcc, diffuseAcc, diffuseAcc, attribs.screenUV + .5f / CV_ScreenSize.xy, attribs.smoothness, attribs.reflectance, 
+			Fwd_GiDiffuseRT, Fwd_GiSpecularRT, ssTrilinearClamp, cbSVOGI.IntegrationMode);
+	}
+#endif
+	
+	for (;;)
+	{
+		[branch]
+		if (lightIndex < 0)
+			break;
+
+		uint lightShadeInfoIdx = lightIndex + maskIndex * 32;
+		int lightType = Fwd_TiledLightsShadeInfo[lightShadeInfoIdx].lightType;
+
+		const float3 position = attribs.worldPos;
+		const float4 posRad = Fwd_TiledLightsShadeInfo[lightShadeInfoIdx].posRad;
+		const float3 lightVec = posRad.xyz - (position + GetWorldViewPos());
+		
+		if (applyNonProbes && lightType > LIGHT_TYPE_AMBIENT_AREA && lightType < LIGHT_TYPE_SUN && length( lightVec ) < posRad.w)
+		{
+			bool skipShading = false;
+			bool shadowMap = false;
+			
+			ForwardLightParams lightParams;
+			lightParams.type = lightType;
+			lightParams.lightVec = normalize(lightVec);
+			lightParams.illuminance = Fwd_TiledLightsShadeInfo[lightShadeInfoIdx].color.rgb;
+			
+			float attenuation = GetPhysicalLightAttenuation( length( lightVec ), rcp(posRad.w), Fwd_TiledLightsShadeInfo[lightShadeInfoIdx].attenuationParams.x );
+			lightParams.illuminance *= attenuation;
+			
+			const float clipVolumeWeight = 1;
+
+			if (lightType == LIGHT_TYPE_REGULAR_PROJECTOR)
+			{
+				if (attenuation > 0)
+				{
+					float4 projTC = mul( Fwd_TiledLightsShadeInfo[lightShadeInfoIdx].projectorMatrix, float4( position + GetWorldViewPos(), 1.0f ) );  
+					projTC.xy /= projTC.w;		
+						
+					if (projTC.w < 0 || min( projTC.x, projTC.y ) < 0 || max( projTC.x, projTC.y ) > 1)  // Avoid back-projection
+						skipShading = true;
+					else
+					{
+						uint4 resIndexClamps = GetResourceIndexAndMipClamps(Fwd_TiledLightsShadeInfo[lightShadeInfoIdx].resIndex);
+						lightParams.illuminance *= Fwd_SpotTexArray.SampleLevel( ssTrilinearClamp, float3(projTC.xy, resIndexClamps.x), resIndexClamps.y ).xxx;
+					}
+						
+					if (Fwd_TiledLightsShadeInfo[lightShadeInfoIdx].shadowParams.x > 0)
+						shadowMap = true;
+				}
+			}
+			else if (lightType == LIGHT_TYPE_REGULAR_POINTFACE)
+			{
+				uint cubeFace = selectCubeFace(lightVec);
+				
+				skipShading = (Fwd_TiledLightsShadeInfo[lightShadeInfoIdx].resIndex != cubeFace);
+				shadowMap   = true;
+			}
+			else if (lightType == LIGHT_TYPE_REGULAR_AREA)
+			{
+				skipShading = Fwd_TiledLightsShadeInfo[lightIndex].shadowParams.x > 0;
+				shadowMap   = false;
+			}
+				
+			if (!skipShading)
+			{
+				float shadowOccl = 1;
+				
+				if (shadowMap)
+				{
+					float4 P0 = mul( Fwd_TiledLightsShadeInfo[lightShadeInfoIdx].shadowMatrix, float4( position + GetWorldViewPos(), 1 ) );
+					P0.xy /= P0.w;
+					P0.z -= Fwd_TiledLightsShadeInfo[lightShadeInfoIdx].shadowParams.y;
+					
+					bool bAllowHighQualityShadows = true;
+					
+					if (bOpaque)
+					{
+						int3 sampleCoords = int3(attribs.screenUV * CV_ScreenSize.xy, Fwd_TiledLightsShadeInfo[lightShadeInfoIdx].shadowMaskIndex);
+						shadowOccl = 1 - Fwd_SunShadowMask[sampleCoords];
+					}
+					else if (shadowHighQualityFiltering && bAllowHighQualityShadows)
+					{
+						float2 kernelRadius = Fwd_TiledLightsShadeInfo[lightShadeInfoIdx].shadowParams.x;
+						float2 rotScale = kernelRadius.y * 1000.0f;
+
+						const int nRotationTextureSize = 64;
+						int2 sampleCoords = int2(P0.xy * rotScale.xy * nRotationTextureSize) % nRotationTextureSize;
+						
+						half2 rotSample = Fwd_RandomRotations.Load(int3(sampleCoords, 0)).xy;
+						rotSample.xy *= kernelRadius.xy * 1/512.0f;
+						float4 rot = float4(rotSample.x, -rotSample.y, rotSample.y, rotSample.x);
+						
+						shadowOccl = 0;
+						for(int s = 0; s < SHADOW_SAMPLE_COUNT / 2; s += 2) // Loop over taps
+						{
+							half4 sampleDepth;
+							{
+								// Rotate tap for this pixel location
+								float4 rotatedOff0 = rot.xyzw * irreg_kernel_2d[s+0].xxww +	rot.zwxy * irreg_kernel_2d[s+0].yyzz;
+								float4 rotatedOff1 = rot.xyzw * irreg_kernel_2d[s+1].xxww +	rot.zwxy * irreg_kernel_2d[s+1].yyzz;
+
+								sampleDepth.x = Fwd_ShadowPool.SampleCmpLevelZero( ssComparison, P0.xy + rotatedOff0.xy, P0.z);
+								sampleDepth.y = Fwd_ShadowPool.SampleCmpLevelZero( ssComparison, P0.xy + rotatedOff0.zw, P0.z);
+								sampleDepth.z = Fwd_ShadowPool.SampleCmpLevelZero( ssComparison, P0.xy + rotatedOff1.xy, P0.z);
+								sampleDepth.w = Fwd_ShadowPool.SampleCmpLevelZero( ssComparison, P0.xy + rotatedOff1.zw, P0.z);
+							}
+
+							shadowOccl += dot(sampleDepth, 1.0 / SHADOW_SAMPLE_COUNT);
+						}
+					}
+					else
+					{
+						shadowOccl = Fwd_ShadowPool.SampleCmpLevelZero( ssComparison, P0.xy, P0.z );
+					}
+				}
+				lightParams.illuminance *= shadowOccl;
+				
+				float3 diffuse = 0, specular = 0;
+				if(lightType == LIGHT_TYPE_REGULAR_AREA)
+				{
+					/*float lightTerm = attenuation ;
+					float3 surfGloss = attribs.smoothness;
+					float3 surfSpecCol = attribs.reflectance;
+					float3 lightPos = posRad.xyz - GetWorldViewPos();
+					float4 lightColor = Fwd_TiledLightsShadeInfo[lightShadeInfoIdx].color;
+					uint4 resIndexClamps = GetResourceIndexAndMipClamps( Fwd_TiledLightsShadeInfo[lightShadeInfoIdx].resIndex );
+					AreaLightLTC_GGX( attribs.normal, -normalize( position ), surfGloss, surfSpecCol, position, lightPos, 
+                                      resIndexClamps.x, Fwd_TiledLightsShadeInfo[lightShadeInfoIdx].projectorMatrix, diffuse, specular );
+					diffuse  *= lightParams.illuminance;
+					specular *= lightParams.illuminance * lightColor.a;*/
+				}
+				else
+					Callback_ShadingDirect(attribs, lightParams, diffuse, specular);
+				diffuseAcc += diffuse;
+				specularAcc += specular;
+			}
+		}
+		
+		while (maskIndex < 8)
+		{
+			lightIndex = GetNextTileLightIndex(curMask, lightIndex);
+			if (lightIndex >= 0) break;
+			else
+			{
+#ifdef SKIP_LIGHT_MASK
+				++maskIndex;
+				lightCount -= 32;
+				curMask = GetLightMask_Raytracing(lightCount);
+#else
+				curMask = Fwd_TileLightMaskRayTracing[++maskIndex + bufferIdx];
+#endif
+			}
+		}
+	}
+}
+
+void Fwd_StandardOpaqueShading_Raytracing(in MaterialAttribsCommon commonAttribs, inout ForwardShadingAttribs fwdAttribs, inout half3 diffuseAcc, inout half3 specularAcc, bool bSunShadows = true)
+{
+	fwdAttribs.normal = commonAttribs.NormalWorld;
+	fwdAttribs.normalSpecProbe = fwdAttribs.normal;
+	fwdAttribs.reflectance = commonAttribs.Reflectance;
+	fwdAttribs.albedo = commonAttribs.Albedo;
+	fwdAttribs.smoothness = commonAttribs.Smoothness;
+	
+#if %_RT_SAMPLE6
+	// Sun shading
+	{
+		float shadowMask = 0;
+		if (bSunShadows)
+			shadowMask = Fwd_SampleSunShadowMaps(fwdAttribs.worldPos + GetWorldViewPos());
+		
+		ForwardLightParams lightParams;
+		lightParams.type = LIGHT_TYPE_SUN;
+		lightParams.lightVec = CV_SunLightDir.xyz;
+		lightParams.illuminance = CV_SunColor.xyz * (1 - shadowMask);
+		Callback_ShadingDirect(fwdAttribs, lightParams, diffuseAcc, specularAcc);
+  }
+#endif
+
+#if %_RT_TILED_SHADING
+  #if %_RT_SECONDARY_VIEW
+	  TiledForwardShading_Raytracing(fwdAttribs, diffuseAcc, specularAcc, ssFwdBilinearWrap, ssFwdComparison, true, true, true, false, false);
+  #else
+	  TiledForwardShading_Raytracing(fwdAttribs, diffuseAcc, specularAcc, ssFwdBilinearWrap, ssFwdComparison, true, true, true, false, true);
+	#endif
+#endif
+
+	// Apply albedo (using simple energy conservation between specular and diffuse)
+	diffuseAcc *= fwdAttribs.albedo * saturate(1 - GetLuminance(fwdAttribs.reflectance));
+}
