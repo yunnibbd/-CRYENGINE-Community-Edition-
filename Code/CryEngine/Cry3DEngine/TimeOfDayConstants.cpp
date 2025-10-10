@@ -6,31 +6,30 @@
 #include <CrySerialization/IArchive.h>
 #include <CrySerialization/Decorators/Range.h>
 #include <CrySerialization/Decorators/Resources.h>
-#include <CrySerialization/Decorators/ResourceFilePath.h> 
 
 namespace
 {
 
-	//Get help from CVar values with prefix e_svo/e_svoTI_ for Total Illumination
-	void AddHelp(Serialization::IArchive& ar, const char* name, const char* refix)
-	{
-		if (ICVar* cvar = gEnv->pConsole->GetCVar(string(refix) + name))
-			ar.doc(cvar->GetHelp());
-	}
+//Get help from CVar values with prefix e_svo/e_svoTI_ for Total Illumination
+void AddHelp(Serialization::IArchive& ar, const char* name, const char* refix)
+{
+	if (ICVar* cvar = gEnv->pConsole->GetCVar(string(refix) + name))
+		ar.doc(cvar->GetHelp());
+}
 
-	template<typename T>
-	void SerializeSvoTi(Serialization::IArchive& ar, T& val, T min, T max, const char* name, const char* userName, const char* prefix = "e_svoTI_")
-	{
-		ar(yasli::Range<T>(val, min, max), name, userName);
-		AddHelp(ar, name, prefix);
-	}
+template<typename T>
+void SerializeSvoTi(Serialization::IArchive& ar, T& val, T min, T max, const char* name, const char* userName, const char* prefix = "e_svoTI_")
+{
+	ar(yasli::Range<T>(val, min, max), name, userName);
+	AddHelp(ar, name, prefix);
+}
 
-	template<typename T>
-	void SerializeSvoTi(Serialization::IArchive& ar, T& val, const char* name, const char* userName, const char* prefix = "e_svoTI_")
-	{
-		ar(val, name, userName);
-		AddHelp(ar, name, prefix);
-	}
+template<typename T>
+void SerializeSvoTi(Serialization::IArchive& ar, T& val, const char* name, const char* userName, const char* prefix = "e_svoTI_")
+{
+	ar(val, name, userName);
+	AddHelp(ar, name, prefix);
+}
 } // unnamed namespace
 
 //////////////////////////////////////////////////////////////////////////
@@ -177,7 +176,7 @@ void ColorGradingImpl::Serialize(Serialization::IArchive& ar)
 }
 
 //////////////////////////////////////////////////////////////////////////
-
+ 
 ImageSettingsImpl::ImageSettingsImpl()
 {
 	ResetVariables();
@@ -215,135 +214,6 @@ void ImageSettingsImpl::Serialize(Serialization::IArchive& ar)
 
 	if (ICVar* pVibrance = gEnv->pConsole->GetCVar("r_Vibrance"))
 		pVibrance->Set(vibrance);
-}
-
-//////////////////////////////////////////////////////////////////////////
-
-RayTracingImpl::RayTracingImpl()
-{
-	ResetVariables();
-}
-
-void RayTracingImpl::ResetVariables()
-{
-	RayEnable = false;
-	RayGIEnable = true;
-	RayAOEnable = true;
-	RayShadowsEnable = true;
-	RayReflectionsEnable = true;
-	GIIntensity = 1;
-	RayBounces = 2;
-	GIDistance = 50;
-	AOIntensity = 1;
-	AORadius = 5;
-	AOSamples = 5;
-	ShadowIntensity = 1;
-	ShadowDistance = 50;
-	ShadowSoftness = 1;
-	ReflectionIntensity = 1;
-	ReflectionDistance = 50;
-	ReflectionRoughness = 0;
-	RayDenoiser = true;
-	RaysPerPixel = 1;
-	RayTAA = true;
-	RayDebug1 = true;
-	RayResScale = 1;
-	RayDebug2 = true;
-}
-
-
-void RayTracingImpl::Serialize(Serialization::IArchive& ar)
-{
-	//ar(RayEnable, "EnableRayTracing", "Enable Ray Tracing");
-	//ar(RayGIEnable, "EnableGlobalIllumination", "Enable Global Illumination");
-	//ar(RayAOEnable, "EnableAmbientOcclusion", "Enable Ambient Occlusion");
-	//ar(RayShadowsEnable, "EnableShadows", "Enable Shadows");
-	//ar(RayReflectionsEnable, "EnableReflections", "Enable Reflections");
-	ar(yasli::Range(RayBounces, 0, 5), "RayTracingBounces", "Ray Tracing Bounces [PERFORMANCE]");
-	ar(yasli::Range(GIIntensity, 0.0f, 32.0f), "GlobalIlluminationIntensity", "Global Illumination Intensity");
-	ar(yasli::Range(AOIntensity, 0.0f, 32.0f), "AmbientOcclusionIntensity", "Ambient Occlusion Intensity");
-	ar(yasli::Range(AORadius, 0.0f, 32.0f), "AmbientOcclusionRadius", "Ambient Occlusion Radius");
-	ar(yasli::Range(AOSamples, 0, 32), "AmbientOcclusionSamples", "Ambient Occlusion Samples");
-	ar(yasli::Range(ShadowIntensity, 0.0f, 32.0f), "ShadowsIntensity", "Shadows Intensity");
-	ar(yasli::Range(ShadowDistance, 0.0f, 500.0f), "ShadowDistance", "Shadow Distance [PERFORMANCE]");
-	ar(yasli::Range(ShadowSoftness, 0.0f, 32.0f), "ShadowSoftness", "Shadow Softness");
-	ar(yasli::Range(ReflectionIntensity, 0.0f, 32.0f), "ReflectionIntensity", "Reflection Intensity");
-	ar(yasli::Range(ReflectionDistance, 0.0f, 500.0f), "ReflectionDistance", "Reflection Distance [PERFORMANCE]");
-	ar(yasli::Range(ReflectionRoughness, 0.0f, 1.0f), "ReflectionRoughness", "Reflections Roughness");
-	ar(RayDenoiser, "RayDenoiser", "Enable Denoiser");
-	ar(yasli::Range(RaysPerPixel, 0, 50), "RaysPerPixel", "Rays Per Pixel [PERFORMANCE]");
-	ar(RayTAA, "TAA", "Enable TAA");
-	ar(yasli::Range(RayResScale, 0, 10), "RayScale", "Resolution Scale [PERFORMANCE]");
-	ar(RayDebug1, "RayDebug1", "Enable Debug");
-	ar(RayDebug2, "RayDebug2", "Enable Debug Draw");
-
-	if (ICVar* pRayTracing = gEnv->pConsole->GetCVar("r_rayTracingEnabled"))
-		pRayTracing->Set(RayEnable ? 1 : 0);
-
-	if (ICVar* pGlobalIllum = gEnv->pConsole->GetCVar("r_rayTracingGI"))
-		pGlobalIllum->Set(RayGIEnable ? 1 : 0);
-
-	if (ICVar* pAO = gEnv->pConsole->GetCVar("r_rayTracingAO"))
-		pAO->Set(RayAOEnable ? 1 : 0);
-
-	if (ICVar* pShadows = gEnv->pConsole->GetCVar("r_rayTracingShadows"))
-		pShadows->Set(RayShadowsEnable ? 1 : 0);
-
-	if (ICVar* pReflections = gEnv->pConsole->GetCVar("r_rayTracingReflections"))
-		pReflections->Set(RayReflectionsEnable ? 1 : 0);
-
-	// Range or numeric variables - simply pass the value.
-	if (ICVar* pBounces = gEnv->pConsole->GetCVar("r_rayTracingGIBounces"))
-		pBounces->Set(RayBounces);
-
-	if (ICVar* pGIIntensity = gEnv->pConsole->GetCVar("r_rayTracingGIIntensity"))
-		pGIIntensity->Set(GIIntensity);
-
-	if (ICVar* pAOIntensity = gEnv->pConsole->GetCVar("r_rayTracingAOIntensity"))
-		pAOIntensity->Set(AOIntensity);
-
-	if (ICVar* pAORadius = gEnv->pConsole->GetCVar("r_rayTracingAORadius"))
-		pAORadius->Set(AORadius);
-
-	if (ICVar* pAOSamples = gEnv->pConsole->GetCVar("r_rayTracingAOSamples"))
-		pAOSamples->Set(AOSamples);
-
-	if (ICVar* pShadowIntensity = gEnv->pConsole->GetCVar("r_rayTracingShadowIntensity"))
-		pShadowIntensity->Set(ShadowIntensity);
-
-	if (ICVar* pShadowDistance = gEnv->pConsole->GetCVar("r_rayTracingShadowDistance"))
-		pShadowDistance->Set(ShadowDistance);
-
-	if (ICVar* pShadowSoftness = gEnv->pConsole->GetCVar("r_rayTracingShadowSoftness"))
-		pShadowSoftness->Set(ShadowSoftness);
-
-	if (ICVar* pReflectionIntensity = gEnv->pConsole->GetCVar("r_rayTracingReflectionIntensity"))
-		pReflectionIntensity->Set(ReflectionIntensity);
-
-	if (ICVar* pReflectionDistance = gEnv->pConsole->GetCVar("r_rayTracingReflectionDistance"))
-		pReflectionDistance->Set(ReflectionDistance);
-
-	if (ICVar* pReflectionRoughness = gEnv->pConsole->GetCVar("r_rayTracingReflectionRoughness"))
-		pReflectionRoughness->Set(ReflectionRoughness);
-
-	if (ICVar* pDenoiser = gEnv->pConsole->GetCVar("r_rayTracingDenoiser"))
-		pDenoiser->Set(RayDenoiser ? 1 : 0);
-
-	if (ICVar* pRaysPerPixel = gEnv->pConsole->GetCVar("r_rayTracingRaysPerPixel"))
-		pRaysPerPixel->Set(RaysPerPixel);
-
-	if (ICVar* pTAA = gEnv->pConsole->GetCVar("r_rayTracingTemporal"))
-		pTAA->Set(RayTAA ? 1 : 0);
-
-	if (ICVar* pResScale = gEnv->pConsole->GetCVar("r_rayTracingResolutionScale"))
-		pResScale->Set(RayResScale);
-
-	if (ICVar* pDebug1 = gEnv->pConsole->GetCVar("r_rayTracingDebug"))
-		pDebug1->Set(RayDebug1 ? 1 : 0);
-
-	if (ICVar* pDebug2 = gEnv->pConsole->GetCVar("r_rayTracingDebugDraw"))
-		pDebug2->Set(RayDebug2 ? 1 : 0);
-
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -464,12 +334,12 @@ void TotalIllumAdvImpl::Serialize(Serialization::IArchive& ar)
 	SerializeSvoTi(ar, pointLightsBias, 0.0f, 1.0f, "PointLightsBias", "Point Lights Bias");
 	SerializeSvoTi(ar, highGlossOcclusion, -100.0f, 1.0f, "HighGlossOcclusion", "High Gloss Occlusion");
 
-	//  ** Early version of RT is excluded from UI until we integrate proper version from Neon Noir branch **
-		//SerializeSvoTi(ar, rtActive, "RT_Active", "RT Active", "e_svoTI_");
-		//SerializeSvoTi(ar, rtMaxDistRay, "RT_MaxDistRay", "RT Max Dist Ray", "e_svoTI_");
-		//SerializeSvoTi(ar, rtMaxDistCam, "RT_MaxDistCam", "RT Max Dist Cam", "e_svoTI_");
-		//SerializeSvoTi(ar, rtMinGloss, "RT_MinGloss", "RT Min Gloss", "e_svoTI_");
-		//SerializeSvoTi(ar, rtMinRefl, "RT_MinRefl", "RT Min Refl", "e_svoTI_");
+//  ** Early version of RT is excluded from UI until we integrate proper version from Neon Noir branch **
+ 	//SerializeSvoTi(ar, rtActive, "RT_Active", "RT Active", "e_svoTI_");
+ 	//SerializeSvoTi(ar, rtMaxDistRay, "RT_MaxDistRay", "RT Max Dist Ray", "e_svoTI_");
+ 	//SerializeSvoTi(ar, rtMaxDistCam, "RT_MaxDistCam", "RT Max Dist Cam", "e_svoTI_");
+ 	//SerializeSvoTi(ar, rtMinGloss, "RT_MinGloss", "RT Min Gloss", "e_svoTI_");
+ 	//SerializeSvoTi(ar, rtMinRefl, "RT_MinRefl", "RT Min Refl", "e_svoTI_");
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -489,8 +359,6 @@ void STimeOfDayConstants::Reset()
 	totalIllumination.ResetVariables();
 	totalIlluminationAdvanced.ResetVariables();
 	imageSettings.ResetVariables();
-	rayTracing.ResetVariables();
-	fullScreenShader.ResetVariables();
 }
 
 void STimeOfDayConstants::Serialize(Serialization::IArchive& ar)
@@ -502,10 +370,8 @@ void STimeOfDayConstants::Serialize(Serialization::IArchive& ar)
 	ar(cloudShadows, "CloudShadows", "Cloud Shadows");
 	ar(imageSettings, "ImageSettings", "Image Settings");
 	ar(colorGrading, "ColorGrading", "Color Grading");
-	ar(rayTracing, "RayTracing", "Ray Tracing");
-	ar(totalIllumination, "TotalIllumination", "SVOGI");
-	ar(totalIlluminationAdvanced, "TotalIlluminationAdv", "SVOGI Advanced");
-	ar(fullScreenShader, "FullScreenShader", "Shader Loading"); // added
+	ar(totalIllumination, "TotalIllumination", "Total Illumination");
+	ar(totalIlluminationAdvanced, "TotalIlluminationAdv", "Total Illumination Advanced");
 }
 
 ITimeOfDay::Sun& STimeOfDayConstants::GetSunParams()
@@ -547,56 +413,4 @@ ITimeOfDay::TotalIllum& STimeOfDayConstants::GetTotalIlluminationParams()
 ITimeOfDay::TotalIllumAdv& STimeOfDayConstants::GetTotalIlluminationAdvParams()
 {
 	return totalIlluminationAdvanced;
-}
-
-ITimeOfDay::FullScreenShader& STimeOfDayConstants::GetFullScreenShaderParams()
-{
-	return fullScreenShader;
-}
-
-
-// Add this implementation after ColorGradingImpl::Serialize (around line 175):
-
-FullScreenShaderImpl::FullScreenShaderImpl()
-{
-	ResetVariables();
-}
-void FullScreenShaderImpl::ResetVariables()
-{
-	useShader = false;
-	shaderFile.clear();
-	shaderName.clear();
-}
-
-
-void FullScreenShaderImpl::Serialize(Serialization::IArchive& ar)
-{
-	ar(useShader, "UseShader", "Enable Shader Loading");
-
-	// Keep engine cvar r_CustomShader in sync with the UI toggle.
-	if (ICVar* pCustomShader = gEnv->pConsole->GetCVar("r_CustomShader"))
-		pCustomShader->Set(useShader ? 1 : 0);
-
-
-	// Allow both .hlsl and .cfx
-	{
-		const char* filter = "HLSL Files (*.hlsl)|*.hlsl|CryFX Scripts (*.cfx)|*.cfx|All files|*.*";
-		string engineStartFolder = PathUtil::Make(PathUtil::GetEnginePath(), "Engine/Shaders/HWScripts");
-		Serialization::ResourceFilePath picker(shaderFile, filter, engineStartFolder.c_str());
-		ar(picker, "ShaderFile", useShader ? "Shader File / Name" : "!Shader File / Name");
-	}
-
-	shaderName = PathUtil::GetFileName(shaderFile);
-	PathUtil::RemoveExtension(shaderName);
-
-	if (ar.isInput())
-	{
-		// Trim
-		shaderFile.TrimLeft(' ');
-		shaderFile.TrimRight(' ');
-		if (shaderFile.length() < 2)
-			shaderFile.clear();
-
-		// No runtime push; FullScreenShaderCtrl is not used.
-	}
 }

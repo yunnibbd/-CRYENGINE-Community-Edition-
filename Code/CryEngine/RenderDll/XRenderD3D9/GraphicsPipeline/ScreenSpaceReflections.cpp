@@ -4,15 +4,6 @@
 #include "ScreenSpaceReflections.h"
 #include "D3DPostProcess.h"
 #include "../../Common/ReverseDepth.h"
-#include "../D3D_RT.h"
-
-// Remove all SSR restrictions for full quality
-namespace {
-	// Always use max quality settings
-	static float CV_r_SSReflDistance = 1.0f;     // Max distance
-	static int   CV_r_SSReflSamples = 1024;     // Massive sample count
-	static int   CV_r_SSReflHalfRes = 0;        // Always full res
-}
 
 void CScreenSpaceReflectionsStage::Init()
 {
@@ -22,7 +13,7 @@ void CScreenSpaceReflectionsStage::Init()
 
 void CScreenSpaceReflectionsStage::Update()
 {
-	CTexture* targetRT = CV_r_SSReflHalfRes
+	CTexture* targetRT = CRenderer::CV_r_SSReflHalfRes
 		? m_graphicsPipelineResources.m_pTexHDRTargetMaskedScaled[0][1]
 		: m_graphicsPipelineResources.m_pTexHDRTargetMasked;
 
@@ -49,7 +40,7 @@ void CScreenSpaceReflectionsStage::Execute()
 
 	CShader* pShader = CShaderMan::s_shDeferredShading;
 
-	CTexture* targetRT = CV_r_SSReflHalfRes
+	CTexture* targetRT = CRenderer::CV_r_SSReflHalfRes
 		? m_graphicsPipelineResources.m_pTexHDRTargetMaskedScaled[0][1]
 		: m_graphicsPipelineResources.m_pTexHDRTargetMasked;
 
@@ -58,7 +49,7 @@ void CScreenSpaceReflectionsStage::Execute()
 	{
 		PROFILE_LABEL_SCOPE("SSR_RAYTRACE");
 
-		if (m_passRaytracing.IsDirty(CV_r_SSReflHalfRes, rd->RT_GetCurrGpuID()))
+		if (m_passRaytracing.IsDirty(CRenderer::CV_r_SSReflHalfRes, rd->RT_GetCurrGpuID()))
 		{
 			static CCryNameTSCRC techRaytrace("SSR_Raytrace");
 			m_passRaytracing.SetTechnique(pShader, techRaytrace, rtMask);
@@ -82,13 +73,12 @@ void CScreenSpaceReflectionsStage::Execute()
 
 		static CCryNameR viewProjPrevName("g_mViewProjPrev");
 		static CCryNameR reprojToPrevName("g_mReprojectToPrev");
-		static CCryNameR ssrParamsName("g_mSSRParams"); // depth buffer param
+		static CCryNameR ssrParamsName("g_mSSRParams"); // we need to tell the shader to read from a depth buffer with twice the size of the output in halfres mode
 		Vec4 ssrParams(
-			CV_r_SSReflHalfRes ? 2.0f : 1.0f,
-			CV_r_SSReflHalfRes ? 2.0f : 1.0f,
-			CV_r_SSReflDistance,         // Now always 1.0 (no cutoff)
-			CV_r_SSReflSamples * 1.0f    // Now always 1024 (super high quality)
-		);
+			CRenderer::CV_r_SSReflHalfRes ? 2.0f : 1.0f,
+			CRenderer::CV_r_SSReflHalfRes ? 2.0f : 1.0f,
+			CRenderer::CV_r_SSReflDistance,
+			CRenderer::CV_r_SSReflSamples * 1.0f);
 
 		m_passRaytracing.BeginConstantUpdate();
 		m_passRaytracing.SetConstantArray(viewProjPrevName, (Vec4*)mViewProjPrev.GetData(), 4, eHWSC_Pixel);
@@ -97,11 +87,13 @@ void CScreenSpaceReflectionsStage::Execute()
 		m_passRaytracing.Execute();
 	}
 
+	// TODO: Compute shader! because the targets are not compressed / able anyway, and we can half resource allocation)
 	if (targetRT != m_graphicsPipelineResources.m_pTexHDRTargetMaskedScaled[0][1])
 	{
 		m_passCopy.Execute(targetRT, m_graphicsPipelineResources.m_pTexHDRTargetMaskedScaled[0][1]);
 	}
 
+	// Convolve sharp reflections
 	m_passDownsample0.Execute(m_graphicsPipelineResources.m_pTexHDRTargetMaskedScaled[0][1], m_graphicsPipelineResources.m_pTexHDRTargetMaskedScaled[1][0]);
 	m_passBlur0.Execute(m_graphicsPipelineResources.m_pTexHDRTargetMaskedScaled[1][0], m_graphicsPipelineResources.m_pTexHDRTargetMaskedScaled[1][1], 1.0f, 3.0f);
 

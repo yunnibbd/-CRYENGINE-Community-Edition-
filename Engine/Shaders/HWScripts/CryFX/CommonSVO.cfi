@@ -187,6 +187,7 @@ RWTexture3D<uint> UAV_4: register (u4);
 RWTexture3D<uint> UAV_5: register (u5);
 RWTexture3D<uint> UAV_6: register (u6);
 RWTexture3D<uint> UAV_7: register (u7);
+RWTexture2D<uint> g_SpecularOut : register(u8);
 
 #include "TiledShading.cfi"
 

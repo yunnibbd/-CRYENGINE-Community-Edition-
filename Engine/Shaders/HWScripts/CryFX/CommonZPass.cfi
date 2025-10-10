@@ -446,6 +446,8 @@ pixout_gbuffer Common_ZPassPS(vert2fragZ IN)
 	cReflectance.xyz = GetLuminance(cReflectance.xyz);
 #endif
 	
+
+
 	attribs.Albedo = cAlbedo;
 	attribs.Reflectance = cReflectance;
 	
@@ -594,6 +596,8 @@ pixout_gbuffer Common_ZPassPS(vert2fragZ IN)
 
 	return OUT;
 }
+
+
 
 #include "CommonZPassTess.cfi"
 

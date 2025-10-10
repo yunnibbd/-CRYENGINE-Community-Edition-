@@ -35,6 +35,7 @@ struct CustomForwardShadingAttribs
 };
 
 
+
 #if %BLENDLAYER
 Texture2D Diffuse2Tex : register(t9)
 <
@@ -55,6 +56,7 @@ Texture2D Height2Tex : register(t8)
   UIDescription = "Height Map for the second blend layer";
 > = TM_SubSurface;
 
+
 Texture2D BlendTex : register(t11)
 <
   UIName = "Blending Map";
@@ -64,19 +66,30 @@ Texture2D BlendTex : register(t11)
 Texture2D smoothness2Tex : register(t7) = TM_DecalOverlay;
 #endif
 
-#if %DECAL
+
+
+
 Texture2D DecalOpacityTex : register(t11)
 <
   UIName = "Decal Opacity Map";
   UIDescription = "Opacity map for decal";
 > = TM_Opacity;
-#endif
+
 
 Texture2D emittanceTex : register(t13)
 <
   UIName = "Emittance";
   UIDescription = "Emittance color/intensity map";
 > = TM_Emittance;
+
+
+Texture2D glossTex : register(t14)
+<
+  UIName = "Gloss Map";
+  UIDescription = "Dedicated gloss map texture";
+> = TM_Gloss;
+
+
 
 ENVIRONMENTCUBEMAP
 
@@ -473,10 +486,19 @@ void GatherMaterialAttribs(in half3x3 mTangentToWS, in float2 baseTC, in half4 v
 	
   // Base layer
 	half3 vNormalTS = half3(0, 0, 1);
+
+
 #if %NORMAL_MAP
 	vNormalTS = GetNormalMap(normalsTex, baseTC.xy);
 #endif
 	attribs.Smoothness = MatSpecColor.w * GetSmoothnessTex(smoothnessTex, baseTC.xy);
+
+	// Use the gloss map if provided; otherwise fall back
+#if %GLOSS_MAP
+    attribs.Smoothness = MatSpecColor.w * GlossMap.Sample(GlossSampler, baseTC.xy).r;
+#else
+    attribs.Smoothness = MatSpecColor.w * GetSmoothnessTex(smoothnessTex, baseTC.xy);
+#endif
 	
 	attribs.Albedo = MatDifColor.rgb;
 	#if !%SILHOUETTE_PARALLAX_OCCLUSION_MAPPING

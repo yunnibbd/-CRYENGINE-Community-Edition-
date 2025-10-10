@@ -986,7 +986,8 @@ void CTimeOfDay::ConstantsChanged()
 	p3DEngine->UpdateMoonParams();
 	p3DEngine->UpdateWindParams();
 	p3DEngine->UpdateCloudShadows();
-
+	
+	// Empty texture means disable color grading; Transition time == 0 -> switch immediately
 	const auto& cgp = GetConstants().GetColorGradingParams();
 	p3DEngine->GetColorGradingCtrl()->SetColorGradingLut(cgp.useTexture ? cgp.texture.c_str() : "", 0.f);
 
@@ -994,6 +995,7 @@ void CTimeOfDay::ConstantsChanged()
 	p3DEngine->UpdateTISettings();
 #endif
 
+	//Will update sun params, and recalculate dependent on it lighting
 	UpdateEnvLighting(true);
 }
 
@@ -1396,8 +1398,6 @@ void CTimeOfDay::UpdateEnvLighting(bool forceUpdate)
 
 	p3DEngine->SetGlobalParameter(E3DPARAM_VOLFOG2_COLOR1, GetValue(PARAM_VOLFOG2_COLOR1));
 	p3DEngine->SetGlobalParameter(E3DPARAM_VOLFOG2_COLOR2, GetValue(PARAM_VOLFOG2_COLOR2));
-
-
 }
 
 //////////////////////////////////////////////////////////////////////////

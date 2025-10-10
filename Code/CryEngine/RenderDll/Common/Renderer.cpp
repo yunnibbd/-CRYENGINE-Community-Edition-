@@ -4463,10 +4463,12 @@ bool CRenderer::IsPost3DRendererEnabled() const
 		return false;
 
 	CPostEffect* pPost3DRenderer = pPostEffectMgr->GetEffect(EPostEffectID::Post3DRenderer);
-	if (!pPost3DRenderer)  // Add this null check!
-		return false;
+	if (pPost3DRenderer)
+	{
+		return pPost3DRenderer->IsActive();
+	}
 
-	return pPost3DRenderer->IsActive();
+	return false;
 }
 
 void CRenderer::ExecuteAsyncDIP()

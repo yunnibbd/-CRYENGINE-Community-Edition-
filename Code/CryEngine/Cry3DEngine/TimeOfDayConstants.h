@@ -48,23 +48,9 @@ struct ColorGradingImpl : public ITimeOfDay::ColorGrading
 	void Serialize(Serialization::IArchive& ar);
 };
 
-struct FullScreenShaderImpl : public ITimeOfDay::FullScreenShader
-{
-	FullScreenShaderImpl();
-	void ResetVariables();
-	void Serialize(Serialization::IArchive& ar);
-};
-
 struct ImageSettingsImpl : public ITimeOfDay::ImageSettings
 {
 	ImageSettingsImpl();
-	void ResetVariables();
-	void Serialize(Serialization::IArchive& ar);
-};
-
-struct RayTracingImpl : public ITimeOfDay::RayTracing
-{
-	RayTracingImpl();
 	void ResetVariables();
 	void Serialize(Serialization::IArchive& ar);
 };
@@ -95,7 +81,6 @@ struct STimeOfDayConstants : public ITimeOfDay::IConstants
 	virtual ITimeOfDay::ColorGrading& GetColorGradingParams() override;
 	virtual ITimeOfDay::TotalIllum& GetTotalIlluminationParams() override;
 	virtual ITimeOfDay::TotalIllumAdv& GetTotalIlluminationAdvParams() override;
-	virtual ITimeOfDay::FullScreenShader& GetFullScreenShaderParams() override;
 
 	virtual void Serialize(Serialization::IArchive& ar) override;
 	virtual void Reset() override;
@@ -109,6 +94,4 @@ struct STimeOfDayConstants : public ITimeOfDay::IConstants
 	TotalIllumImpl    totalIllumination;
 	TotalIllumAdvImpl totalIlluminationAdvanced;
 	ImageSettingsImpl imageSettings;
-	RayTracingImpl	  rayTracing;
-	FullScreenShaderImpl fullScreenShader;
 };

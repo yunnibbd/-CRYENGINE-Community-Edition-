@@ -17,6 +17,7 @@
 #define OPACITYMAP            Texture2D   opacityTex          : register(t11)                                   = TM_Opacity;
 #define TRANSLUCENCYMAP       Texture2D   translucencyTex     : register(t12)                                   = TM_Translucency;
 #define EMITTANCEMAP          Texture2D   emittanceTex        : register(t13)                                   = TM_Emittance;
+#define GLOSSMAP			  Texture2D	  glossTex			  : register(t14)									= TM_Gloss;
 #define flowTex               detailTex  
 
 // GBuffer per pass textures.

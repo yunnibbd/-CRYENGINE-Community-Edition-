@@ -1383,7 +1383,6 @@ Texture2D shScreenScaledTex : register(t1);
 SamplerState shPointClampSampler : register(s0) = SS_PointClamp;
 SamplerState shLinearClampSampler : register(s1) = SS_TrilinearClamp;
 
-
 pixout CA_SharpeningPS(vtxOut IN)
 {
     pixout OUT;
@@ -1451,7 +1450,6 @@ pixout CA_SharpeningPS(vtxOut IN)
 
     return OUT;
 }
-
 
 
 

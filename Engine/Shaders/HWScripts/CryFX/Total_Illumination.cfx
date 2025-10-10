@@ -74,10 +74,52 @@ Texture2D noiseMap2D: register (t15);
 Texture2D shadowFromSvoMinMax: register (t15);
 Texture2D shadowFromSvoFinPrev: register (t16);
 
+
 Texture2D levelHeightmap: register (t8);
+
+// --- Voxel Ray Tracing Resources ---
+Texture3D<float> g_VoxOpacity;     // voxel occupancy volume (0 = empty, 1 = filled)
+Texture3D<float4> g_VoxAlbedo;     // voxel albedo (emissive or stored color)
+Texture3D<float4> g_VoxNormal;     // voxel average normal
+StructuredBuffer<uint> g_VoxTriIndices; // triangle index list per voxel
+StructuredBuffer<TriangleData> g_Triangles; // triangle data (positions, normals, material)
+
+Texture2D<float4> g_Normals;    // G-buffer normal (xyz) + roughness (w)
+Texture2D<float4> g_AlbedoSpec; // G-buffer albedo (xyz) + specular or metalness (w)
+Texture2D<float>  g_Depth;      // G-buffer depth
+
+
+cbuffer cbRayTraceParams : register(b0)
+{
+    float3 g_CamPos;
+    float  g_MaxRayDistance;
+    float  g_MinGlossiness; // threshold for switching to cone tracing
+    float  g_Time;          // time in seconds
+    uint   g_FrameIndex;    // frame index for TAA or temporal effects
+    float2 g_Padding;       // padding for 16-byte alignment
+};
+
+
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Structures
+
+struct TriangleData
+{
+    float3 v0;
+    float  pad0;
+    float3 v1;
+    float  pad1;
+    float3 v2;
+    float  pad2;
+    float3 normal;
+    float  pad3;
+    float4 materialParams; // x: albedo.r, y: albedo.g, z: albedo.b, w: roughness
+    float  emissive;
+    float3 pad4;
+};
+
+
 struct vtxOutWPOS
 {
 	float4 HPosition: SV_POSITION;
@@ -164,6 +206,18 @@ struct pixout_TraceSunShadows
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Functions
+
+
+
+// Forces the albedo color to red
+float3 SpecularRayTrace_CS(float3 originalAlbedo)
+{
+    return float3(1.0, 0.0, 0.0); // Red
+}
+
+
+
+
 
 float3 GetDiffuseKernel(out int GI_DIFFUSE_KERNEL_TILING, int nElemId, const bool bFullSphere = true)
 {
@@ -1454,6 +1508,42 @@ void ConeTrace_LM_PS(in vtxOutWPOS IN, out float4 vALD, out float4 vRGB)
 
 	float4 vC = vRgbOut;
 	vC /= max(vRgbOut.w, .01f);
+
+	float3 worldPos  = GetWorldPos( fDepth, IN.CamVec );                    // your surface pos
+float3 N         = normalize(vNor0);                                   // G-buffer normal
+float  roughness = DecodeGBufferChannels(IN.baseTC.xy).Smoothness;     // or however you fetch smoothness
+float3 V         = normalize(PS_WorldViewPos.xyz - worldPos);          // view vector
+float3 R         = reflect(-V, N);                                     // reflection dir
+
+// configure your cone
+int   numSteps  = lerp(8, 32, saturate(roughness));  
+float coneAngle = roughness * PI * 0.5;
+float  t        = 0.1;      // offset to avoid self-hit
+float3 specAcc  = 0;
+float  wAcc     = 0;
+
+for (int i = 0; i < numSteps; i++)
+{
+    float3 samplePos = worldPos + R * t;
+    if (!InsideVoxelVolume(samplePos)) break;
+
+    float radius = t * tan(coneAngle);
+    float  lod    = clamp(log2(radius / VOXEL_SIZE), 0, MAX_VOX_LOD);
+
+    float3 voxelRad = VoxelRadiance.SampleLevel(voxelSampler, samplePos, lod).rgb;
+    float  vis      = VoxelOpacity.SampleLevel(voxelSampler, samplePos, lod).r;
+
+    float  w = GGX_SpecularWeight(roughness, dot(R, V)) * vis;
+    specAcc += voxelRad * w;
+    wAcc   += w;
+
+    t += MAX_TRACE_DIST / numSteps;
+}
+
+float3 tracedSpec = (wAcc > 0) ? specAcc / wAcc : float3(0,0,0);
+
+// now blend it into your outgoing specular target
+OUT.Specular = float4(tracedSpec * SpecularIntensity, 1);
 
 	vRGB.xyz = (vC.xyz + .001);
 
@@ -2882,8 +2972,18 @@ technique UpScalePass
 	}
 }
 
+
+
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Compute techniques
+
+technique
+  SpecularRayTrace {
+    pass p0 {
+        ComputeShader = SpecularRayTrace_CS();
+    }
+}
+
 
 technique
   ComputeClearBricks {

@@ -38,10 +38,12 @@ Property
   Mask = 0x10
   Property    (Specular map)
   Description (Use specular map as separate texture)
-  DependencySet = $TEX_Specular
-  DependencyReset = $TEX_Specular
+  DependencySet = $TEX_Smoothness
+  DependencyReset = $TEX_Smoothness
   Hidden
 }
+
+
 
 Property
 {
@@ -162,4 +164,12 @@ Property
   Mask = 0x80000
   DependencySet = $UserEnabled
   Hidden
+}
+
+Property
+{
+  Name = %GLOSSM
+  Mask = 0x500000
+  Property    (Gloss map)
+  Description (Use gloss map as separate texture)
 }

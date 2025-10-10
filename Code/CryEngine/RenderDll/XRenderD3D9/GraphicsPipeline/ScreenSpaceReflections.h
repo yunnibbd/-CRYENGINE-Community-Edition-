@@ -1,4 +1,4 @@
-﻿// Copyright 2015-2021 Crytek GmbH / Crytek Group. All rights reserved.
+// Copyright 2015-2021 Crytek GmbH / Crytek Group. All rights reserved.
 
 #pragma once
 
@@ -24,10 +24,9 @@ public:
 		, m_passBlur2(&graphicsPipeline) {
 	}
 
-	// Always active, regardless of cvars or material flags
-	bool IsStageActive(EShaderRenderingFlags /*flags*/) const final
+	bool IsStageActive(EShaderRenderingFlags flags) const final
 	{
-		return true;
+		return CRendererCVars::CV_r_SSReflections > 0;
 	}
 
 	void Init() final;

@@ -1,0 +1,214 @@
+// Raytracing Specular Shader for CryEngine (.cfx)
+// Combines ray generation and output logic
+
+// Constant buffer with camera parameters (set from C++)
+cbuffer CameraCB : register(b0)
+{
+    float4x4 invViewProj;    // inverse view-projection matrix
+    float3 cameraPos;
+    float rayEpsilon, rayMaxT;
+};
+
+// Raytracing acceleration structure and output texture
+RaytracingAccelerationStructure SceneTLAS : register(t0);
+RWTexture2D<float4> SpecularOutput : register(u0);
+
+// Payload structure for ray tracing
+struct SpecPayload
+{
+    float3 color;
+    uint hit;
+};
+
+// Ray generation shader entry point
+[shader("raygeneration")]
+void RayGen_Specular()
+{
+    uint2 dispatch = DispatchRaysIndex().xy;
+    uint2 dims = DispatchRaysDimensions().xy;
+    float2 uv = (float2(dispatch) + 0.5) / float2(dims);
+
+    // Reconstruct world-space ray from screen uv
+    float4 ndc = float4(uv * 2.0f - 1.0f, 0.0f, 1.0f);
+    float4 worldPos = mul(invViewProj, ndc);
+    worldPos /= worldPos.w;
+    float3 dir = normalize(worldPos.xyz - cameraPos);
+
+    RayDesc ray;
+    ray.Origin = cameraPos;
+    ray.TMin = rayEpsilon;
+    ray.Direction = dir;
+    ray.TMax = rayMaxT;
+
+    SpecPayload payload;
+    payload.color = float3(0, 0, 0);
+    payload.hit = 0;
+
+    // Trace the ray
+    TraceRay(
+        SceneTLAS,
+        RAY_FLAG_NONE,
+        0xFF,
+        0,
+        0,
+        0,
+        ray,
+        payload
+    );
+
+    // Write the result to the output texture
+    SpecularOutput[dispatch] = float4(payload.color, 1.0f);
+}
+
+// Texture and sampler for material alpha masking
+Texture2D MaterialAlphaTexture : register(t1);
+SamplerState samplerLinear : register(s0);
+
+// Hit attribute structure (must include texcoord for alpha test)
+struct HitAttrib
+{
+    float3 normal;
+    float2 texcoord;
+};
+
+[shader("anyhit")]
+void AnyHit_Main(inout SpecPayload payload, in HitAttrib attr)
+{
+    // Alpha test: ignore hit if alpha is below threshold
+    float alpha = MaterialAlphaTexture.SampleLevel(samplerLinear, attr.texcoord, 0).r;
+    if (alpha < 0.5f)
+    {
+        ignoreHit(); // Skip this hit, continue searching
+    }
+    // Otherwise, accept the hit (default behavior)
+}
+
+// Material specular color (can be set from C++ or material system)
+float3 MaterialSpecularColor : register(c1); // Example: set via constant buffer slot c1
+
+[shader("closesthit")]
+void ClosestHit_Specular(inout SpecPayload payload, in BuiltInTriangleIntersectionAttributes attr)
+{
+    // Compute world-space hit position and normal
+    float3 worldPos = WorldRayOrigin() + WorldRayDirection() * RayTCurrent();
+    float3 worldNormal = normalize(mul(attr.normal, (float3x3)ObjectToWorld3x4()));
+
+    // Fetch material specular color (assume constant or from texture)
+    float3 specColor = MaterialSpecularColor;
+    payload.hit = 1;
+
+    // Spawn a reflection ray for one bounce
+    float3 reflectDir = reflect(WorldRayDirection(), worldNormal);
+    RayDesc reflRay;
+    reflRay.Origin = worldPos;
+    reflRay.TMin = 0.001f;
+    reflRay.Direction = reflectDir;
+    reflRay.TMax = rayMaxT;
+
+    SpecPayload reflPayload;
+    reflPayload.color = float3(0, 0, 0);
+    reflPayload.hit = 0;
+
+    TraceRay(
+        SceneTLAS,
+        RAY_FLAG_NONE,
+        0xFF,
+        0, // use same hit group index as primary ray
+        0,
+        0, // use same miss shader
+        reflRay,
+        reflPayload
+    );
+
+    // Combine reflection color with material specular
+    payload.color = reflPayload.color * specColor;
+}
+
+// Material diffuse color (can be set from C++ or material system)
+float3 MaterialDiffuseColor : register(c2); // Example: set via constant buffer slot c2
+
+// Payload structure for diffuse rays
+struct DiffusePayload
+{
+    float3 color;
+    uint randSeed;
+};
+
+// Cosine-weighted hemisphere sampling utility
+float3 SampleHemisphereCosine(float3 normal, inout uint randSeed)
+{
+    // Simple hash-based random (replace with better RNG as needed)
+    randSeed ^= randSeed << 13;
+    randSeed ^= randSeed >> 17;
+    randSeed ^= randSeed << 5;
+    float u1 = frac(randSeed * 0.0000001192092896f); // 1/2^23
+    randSeed ^= randSeed << 13;
+    randSeed ^= randSeed >> 17;
+    randSeed ^= randSeed << 5;
+    float u2 = frac(randSeed * 0.0000001192092896f);
+
+    float r = sqrt(u1);
+    float theta = 2.0f * 3.14159265f * u2;
+    float x = r * cos(theta);
+    float y = r * sin(theta);
+    float z = sqrt(1.0f - u1);
+
+    // Orthonormal basis
+    float3 up = abs(normal.z) < 0.999f ? float3(0,0,1) : float3(1,0,0);
+    float3 tangent = normalize(cross(up, normal));
+    float3 bitangent = cross(normal, tangent);
+
+    return normalize(x * tangent + y * bitangent + z * normal);
+}
+
+[shader("closesthit")]
+void ClosestHit_Diffuse(inout DiffusePayload payload, in BuiltInTriangleIntersectionAttributes attr)
+{
+    float3 worldPos = WorldRayOrigin() + WorldRayDirection() * RayTCurrent();
+    float3 worldNormal = normalize(mul(attr.normal, (float3x3)ObjectToWorld3x4()));
+    float3 diffuseColor = MaterialDiffuseColor;
+
+    // Cosine-weighted hemisphere sample around normal
+    float3 hemiDir = SampleHemisphereCosine(worldNormal, payload.randSeed);
+    RayDesc diffRay;
+    diffRay.Origin = worldPos;
+    diffRay.TMin = 0.001f;
+    diffRay.Direction = hemiDir;
+    diffRay.TMax = rayMaxT;
+
+    DiffusePayload diffPayload;
+    diffPayload.color = float3(0,0,0);
+    diffPayload.randSeed = payload.randSeed; // propagate random seed if needed
+
+    TraceRay(
+        SceneTLAS,
+        RAY_FLAG_NONE,
+        0xFF,
+        0,
+        0,
+        0,
+        diffRay,
+        diffPayload
+    );
+
+    // Lambertian reflectance
+    payload.color = diffuseColor * diffPayload.color;
+}
+
+// Environment map for miss shader (can be set from C++ or material system)
+TextureCube EnvironmentMap : register(t2);
+SamplerState samplerEnv : register(s1);
+
+// Utility function to sample the environment map
+float3 SampleEnvironment(float3 dir)
+{
+    // Assumes dir is normalized world direction
+    return EnvironmentMap.Sample(samplerEnv, dir).rgb;
+}
+
+[shader("miss")]
+void Miss_Main(inout SpecPayload payload)
+{
+    // Sample sky/environment as fallback
+    payload.color = SampleEnvironment(WorldRayDirection());
+}

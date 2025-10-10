@@ -40,22 +40,18 @@
 #include "OmniCamera.h"
 #include "TiledLightVolumes.h"
 #include "DebugRenderTargets.h"
-#include "D3D_RT.h"
-#include "../D3D_Shader.h"
+#include "RayTracing.h"
 
 #include "Common/TypedConstantBuffer.h"
 #include "Common/Textures/TextureHelpers.h"
 #include "Common/Include_HLSL_CPP_Shared.h"
 #include "../Common/RenderView.h"
 
-#include <Cry3DEngine/ITimeOfDay.h>
-
 #include "Common/RenderDisplayContext.h"
 
 #include "../D3DPostProcess.h"
 #include "Common/ReverseDepth.h"
 #include "D3D_SVO.h"
-#include "../XRenderD3D9/D3D_DXC.h"
 
 CStandardGraphicsPipeline::CStandardGraphicsPipeline(const IRenderer::SGraphicsPipelineDescription& desc, const std::string& uniqueIdentifier, const SGraphicsPipelineKey key)
 	: CGraphicsPipeline(desc, uniqueIdentifier, key)
@@ -95,11 +91,7 @@ void CStandardGraphicsPipeline::Init()
 	RegisterStage<CSceneDepthStage>();
 	RegisterStage<COmniCameraStage>();
 	RegisterStage<CVolumetricFogStage>();
-	RegisterStage<CD3D_RT>();
 
-
-	// Register and initialize all common stages
-	CGraphicsPipeline::Init();
 
 	// Register and initialize all common stages
 	CGraphicsPipeline::Init();
@@ -182,7 +174,6 @@ void CStandardGraphicsPipeline::ExecuteHDRPostProcessing()
 	FUNCTION_PROFILER_RENDERER();
 	PROFILE_LABEL_SCOPE("POST_EFFECTS_HDR");
 
-
 	const auto& viewInfo = GetCurrentViewInfo(CCamera::eEye_Left);
 	PostProcessUtils().m_pView = viewInfo.viewMatrix;
 	PostProcessUtils().m_pProj = viewInfo.projMatrix;
@@ -194,7 +185,7 @@ void CStandardGraphicsPipeline::ExecuteHDRPostProcessing()
 	if (GetStage<CRainStage>()->IsStageActive(m_renderingFlags))
 		GetStage<CRainStage>()->Execute();
 
-	// Use prev HDR for MB
+	// Note: MB uses m_pTexHDRTargetPrev to avoid doing another copy, so this should be right before the MB pass
 	{
 		m_FrameToFramePass->Execute(m_pipelineResources.m_pTexHDRTarget, m_pipelineResources.m_pTexHDRTargetPrev[GetCurrentRenderView()->GetCurrentEye()]);
 	}
@@ -208,130 +199,55 @@ void CStandardGraphicsPipeline::ExecuteHDRPostProcessing()
 	if (GetStage<CSnowStage>()->IsStageActive(m_renderingFlags))
 		GetStage<CSnowStage>()->Execute();
 
-
-
-	// Half res downsample
+	// Half resolution downsampling
 	if (GetStage<CAutoExposureStage>()->IsStageActive(m_renderingFlags) ||
-		GetStage<CBloomStage>()->IsStageActive(m_renderingFlags) ||
-		GetStage<CSunShaftsStage>()->IsStageActive(m_renderingFlags))
+	    GetStage<CBloomStage>()->IsStageActive(m_renderingFlags) ||
+	    GetStage<CSunShaftsStage>()->IsStageActive(m_renderingFlags))
 	{
 		PROFILE_LABEL_SCOPE("HALFRES_DOWNSAMPLE_HDRTARGET");
+
 		if (CRendererCVars::CV_r_HDRBloomQuality > 1)
 			m_HQSubResPass[0]->Execute(m_pipelineResources.m_pTexHDRTarget, m_pipelineResources.m_pTexHDRTargetScaled[0][0], true);
 		else
 			m_LQSubResPass[0]->Execute(m_pipelineResources.m_pTexHDRTarget, m_pipelineResources.m_pTexHDRTargetScaled[0][0]);
 	}
 
-	// Quarter res
+	// Quarter resolution downsampling
 	if (GetStage<CAutoExposureStage>()->IsStageActive(m_renderingFlags) ||
-		GetStage<CBloomStage>()->IsStageActive(m_renderingFlags))
+	    GetStage<CBloomStage>()->IsStageActive(m_renderingFlags))
 	{
 		PROFILE_LABEL_SCOPE("QUARTER_RES_DOWNSAMPLE_HDRTARGET");
+
 		if (CRendererCVars::CV_r_HDRBloomQuality > 0)
 			m_HQSubResPass[1]->Execute(m_pipelineResources.m_pTexHDRTargetScaled[0][0], m_pipelineResources.m_pTexHDRTargetScaled[1][0], CRendererCVars::CV_r_HDRBloomQuality >= 1);
 		else
 			m_LQSubResPass[1]->Execute(m_pipelineResources.m_pTexHDRTargetScaled[0][0], m_pipelineResources.m_pTexHDRTargetScaled[1][0]);
 	}
 
+	// reads CRendererResources::s_ptexHDRTargetScaled[1][0]
 	if (GetStage<CAutoExposureStage>()->IsStageActive(m_renderingFlags))
 		GetStage<CAutoExposureStage>()->Execute();
 
+	// reads CRendererResources::s_ptexHDRTargetScaled[1][0] and then kills it
 	if (GetStage<CBloomStage>()->IsStageActive(m_renderingFlags))
 		GetStage<CBloomStage>()->Execute();
 
+	// writes m_graphicsPipelineResources.m_pTexSceneTargetR11G11B10F[0]
 	if (GetStage<CLensOpticsStage>()->IsStageActive(m_renderingFlags))
 		GetStage<CLensOpticsStage>()->Execute();
 
+	// reads CRendererResources::s_ptexHDRTargetScaled[0][0]
 	if (GetStage<CSunShaftsStage>()->IsStageActive(m_renderingFlags))
 		GetStage<CSunShaftsStage>()->Execute();
 
 	if (GetStage<CColorGradingStage>()->IsStageActive(m_renderingFlags))
 		GetStage<CColorGradingStage>()->Execute();
 
-	
-
-
-	// ------------------------------------------------------------
-	// COMICS FULLSCREEN PASS (HDR domain, BEFORE tone mapping)
-	// Input:  HDRTargetPrev[eye]  (safe copy)
-	// Output: HDRTarget (same resolution/format)
-	
-	{
-		if (CRenderer::CV_r_CustomShader == 1)
-		{
-			ITimeOfDay* pTOD = gEnv->p3DEngine ? gEnv->p3DEngine->GetTimeOfDay() : nullptr;
-			if (pTOD)
-			{
-				const ITimeOfDay::FullScreenShader& fsParams = pTOD->GetFullScreenShaderParams();
-				if (fsParams.useShader && !fsParams.shaderFile.empty())
-				{
-					auto& fsPass = CFullscreenHlslPass::Get();
-
-					// If user changed shader selection or pass disabled, (re)configure.
-					// Pass accepts either bare name or full path; it will resolve and append .hlsl if needed.
-					if (!fsPass.IsEnabled() || fsPass.GetSource() != fsParams.shaderFile)
-					{
-						fsPass.UpdateSettings(true, fsParams.shaderFile.c_str());
-					}
-
-					// Proceed only if enabled and a target is valid.
-					if (fsPass.IsEnabled())
-					{
-						PROFILE_LABEL_SCOPE("CUSTOM_FULLSCREEN_SHADER");
-
-						const int eye = GetCurrentRenderView()->GetCurrentEye();
-						CTexture* pInputHDR = m_pipelineResources.m_pTexHDRTargetPrev[eye];
-						CTexture* pDepth = GetCurrentRenderView()->GetDepthTarget();
-						CTexture* pNormalsOpt = m_pipelineResources.m_pTexSceneNormalsMap;
-
-						fsPass.SetResources(pInputHDR, pDepth, pNormalsOpt);
-						fsPass.SetExplicitTarget(m_pipelineResources.m_pTexHDRTarget);
-
-						// Ensure screen size params (user can still override stylistic params later via CVars/UI if extended)
-						SComicsParams params{};
-						params.ScreenWidth = (float)m_pipelineResources.m_pTexHDRTarget->GetWidth();
-						params.ScreenHeight = (float)m_pipelineResources.m_pTexHDRTarget->GetHeight();
-						fsPass.UpdateParams(params);
-
-						fsPass.Execute();
-					}
-				}
-				else
-				{
-					// User disabled shader in Environment Editor; ensure pass is disabled if previously active.
-					if (CFullscreenHlslPass::Get().IsEnabled())
-						CFullscreenHlslPass::Get().UpdateSettings(false, "");
-				}
-			}
-		}
-		else
-		{
-			// r_CustomShader cvar disabled; turn off pass if it was on.
-			if (CFullscreenHlslPass::Get().IsEnabled())
-				CFullscreenHlslPass::Get().UpdateSettings(false, "");
-		}
-	}
-
-	
-	
-
+	// 0 is used for disable debugging and 1 is used to just show the average and estimated luminance, and exposure values.
 	if (GetStage<CToneMappingStage>()->IsDebugDrawEnabled())
 		GetStage<CToneMappingStage>()->ExecuteDebug();
 	else
 		GetStage<CToneMappingStage>()->Execute();
-
-	// === RT COMPOSE (custom HLSL) — must happen BEFORE tone mapping ===
-	if (CRenderer::CV_r_rayTracingEnabled == 1)
-	{
-		if (CD3D_RT* pRT = CD3D_RT::GetForPostCompose())
-		{
-			pRT->Execute();
-			//pRT->ComposeToHDROneShot();
-		}
-	}
-	// === END RT COMPOSE ===
-
-
 }
 
 void CStandardGraphicsPipeline::Execute()
@@ -342,7 +258,6 @@ void CStandardGraphicsPipeline::Execute()
 	CRenderView* pRenderView = GetCurrentRenderView();
 	auto& renderItemDrawer = pRenderView->GetDrawer();
 	CTexture* pZTexture = pRenderView->GetDepthTarget();
-
 
 	m_renderPassScheduler.SetEnabled(true);
 
@@ -420,20 +335,11 @@ void CStandardGraphicsPipeline::Execute()
 #endif
 		}
 
-		//GetStage<CD3D_RayTracing>()->InitializeRayTracingPipeline();
-
-		if (CRenderer::CV_r_rayTracingEnabled == 1)
-		{
-			GetStage<CD3D_RT>()->Init();
-			GetStage<CD3D_RT>()->Execute();
-		}
 
 
 		// Screen Space Reflections
 		if (GetStage<CScreenSpaceReflectionsStage>()->IsStageActive(m_renderingFlags))
 			GetStage<CScreenSpaceReflectionsStage>()->Execute();
-
-		
 
 		// Height Map AO
 		if (GetStage<CHeightMapAOStage>()->IsStageActive(m_renderingFlags))
@@ -532,8 +438,8 @@ void CStandardGraphicsPipeline::Execute()
 	pRenderer->InsertParticleVideoDataFence(pRenderer->GetRenderFrameID());
 
 	if (pRenderView->GetCurrentEye() == CCamera::eEye_Right ||
-		!pRenderer->GetS3DRend().IsStereoEnabled() ||
-		!pRenderer->GetS3DRend().RequiresSequentialSubmission())
+	    !pRenderer->GetS3DRend().IsStereoEnabled() ||
+	    !pRenderer->GetS3DRend().RequiresSequentialSubmission())
 	{
 		GetStage<CComputeParticlesStage>()->PostDraw();
 	}
@@ -546,7 +452,6 @@ void CStandardGraphicsPipeline::Execute()
 
 	if (!(m_renderingFlags & SHDF_CUBEMAPGEN))
 	{
-
 		// HDR and LDR post-processing
 		{
 			// CRendererResources::s_ptexHDRTarget -> CRendererResources::s_ptexDisplayTarget (Tonemapping)

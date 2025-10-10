@@ -74,7 +74,6 @@ public:
 	static ICVar* CV_r_ShowTexture;
 	static ICVar* CV_r_TexturesStreamingDebugfilter;
 
-
 	//declare cvars differing on platforms
 	static int   CV_r_vsync;
 #if defined(SUPPORT_DEVICE_INFO_USER_DISPLAY_OVERRIDES)
@@ -163,45 +162,6 @@ public:
 	static int CV_r_meshinstancepoolsize;
 	static int CV_r_MeshPoolForceFreeAfterUpdate;
 	static int CV_r_multigpu;
-
-	static int CV_r_GI_Mode;
-
-	static int CV_r_rayTracingEnabled;
-	static int CV_r_rayTracingGI;
-	static int CV_r_rayTracingAO;
-	static int CV_r_rayTracingShadows;
-	static int CV_r_rayTracingReflections;
-	static float CV_r_rayTracingGIIntensity;
-	static int CV_r_rayTracingGIBounces;
-	static float CV_r_rayTracingGIDistance;
-	static float CV_r_rayTracingAOIntensity;
-	static float CV_r_rayTracingAORadius;
-	static int CV_r_rayTracingAOSamples;
-	static float CV_r_rayTracingShadowIntensity;
-	static float CV_r_rayTracingShadowDistance;
-	static float CV_r_rayTracingShadowSoftness;
-	static float CV_r_rayTracingReflectionIntensity;
-	static float CV_r_rayTracingReflectionDistance;
-	static float CV_r_rayTracingReflectionRoughness;
-	static int CV_r_rayTracingDenoiser;
-	static int CV_r_rayTracingRaysPerPixel;
-	static int CV_r_rayTracingTemporal;
-	static int CV_r_rayTracingDebug;
-	static int CV_r_rayTracingResolutionScale;
-	static int CV_r_rayTracingDebugDraw;
-
-	static int CV_r_CustomShader;
-
-	static string CV_e_DXRShaderLocation;
-
-	static int CV_r_PTGI_MaxBounces;
-	static int CV_r_PTGI_SamplesPerPixel;
-
-	static int CV_e_svoTI_TraceReflections;
-	static float CV_e_svoTI_TraceGlossinessThreshold;
-	static int CV_e_svoTI_TraceHalfRes;
-	static float CV_e_svoTI_ReflectionStrength;
-	
 
 	static int CV_r_nodrawnear;
 	static int CV_r_DrawNearShadows;
@@ -717,7 +677,6 @@ public:
 	static int CV_r_GpuParticles;
 	static int CV_r_GpuParticlesGpuBoundingBox;
 	static int CV_r_GpuPhysicsFluidDynamicsDebug;
-
 
 	ICVar*     CV_capture_frames;
 	ICVar*     CV_capture_folder;

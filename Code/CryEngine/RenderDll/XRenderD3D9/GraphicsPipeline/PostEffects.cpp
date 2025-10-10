@@ -9,9 +9,6 @@
 
 #include <Common/RenderDisplayContext.h>
 
-#include <Cry3DEngine/IFullScreenShaderCtrl.h>
-#include <Cry3DEngine/I3DEngine.h>
-
 //////////////////////////////////////////////////////////////////////////
 
 CPostEffectContext::CPostEffectContext()
@@ -692,9 +689,6 @@ void CVibrancePass::Init(CPostEffectContext* p)
 
 void CVibrancePass::Execute()
 {
-
-
-
 	const CEffectParam* pAmount = m_pContext->GetEffectParamByName("FilterVibrance_Amount");
 	const CEffectParam* pVibrance = m_pContext->GetEffectParamByName("FilterVibrance_Vibrance"); // Add this line
 
