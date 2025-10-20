@@ -1,5 +1,5 @@
 # CRYENGINE Community Edition
-CRYENGINE Community Edition is a new version of the engine developed and maintained by the community. It builds on the foundation of CRYENGINE while introducing new features, improvements, and customization options contributed by developers in their free time.
+CRYENGINE Community Edition is a new features and improvements developed and maintained by the community. It builds on the foundation of CRYENGINE while introducing new features, improvements, and customization options contributed by developers in their free time.
 ## Installation
 - Download the source code for CRYENGINE 5.7
 - After you get cryengine 5.7.1 source code, 
